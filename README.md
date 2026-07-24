@@ -15,8 +15,11 @@ Serveur et briques HTTP en pur [Nolc](https://github.com/Noliae-France/nolc), sa
 
 MIT © 2026 Bastien LANGUEDOC.
 
-## Livré (v0.1)
-`methode_valide`, `chemin_normalise`, `chemin_correspond`, `statut_texte`.
+## Livré (v0.2)
+- Routage : `methode_valide`, `chemin_normalise`, `chemin_correspond`, `statut_texte`
+- Parsing requête : `requete_methode`, `requete_cible`, `requete_version`
+- Cible/URL : `cible_chemin`, `cible_query`, `query_param(cle)`
+- En-têtes : `entete_valeur(cle)` (insensible à la casse)
 
 ## Feuille de route
 - Parseur HTTP/1.1 (requêtes/réponses typées) puis **HTTP/2** (framing, HPACK, multiplexing, flow control)

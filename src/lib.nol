@@ -41,6 +41,85 @@ fn statut_texte(code: Int) -> Text {
     return "Status"
 }
 
+// ---- Parsing de la ligne de requête « METHODE CIBLE VERSION » ----
+
+// Méthode d'une ligne de requête (« GET /x HTTP/1.1 » -> « GET »). "" si vide.
+fn requete_methode(ligne: Text) -> Text {
+    let parts = split(ligne, " ")
+    if len(parts) < 1 {
+        return ""
+    }
+    return get(parts, 0)
+}
+
+// Cible d'une ligne de requête (« /x?y=1 »). "" si absente.
+fn requete_cible(ligne: Text) -> Text {
+    let parts = split(ligne, " ")
+    if len(parts) < 2 {
+        return ""
+    }
+    return get(parts, 1)
+}
+
+// Version d'une ligne de requête (« HTTP/1.1 »). "" si absente.
+fn requete_version(ligne: Text) -> Text {
+    let parts = split(ligne, " ")
+    if len(parts) < 3 {
+        return ""
+    }
+    return get(parts, 2)
+}
+
+// Chemin d'une cible (partie avant « ? »).
+fn cible_chemin(cible: Text) -> Text {
+    let q = unwrap_or(find(cible, "?"), -1)
+    if q < 0 {
+        return cible
+    }
+    return sub(cible, 0, q)
+}
+
+// Chaîne de requête d'une cible (partie après « ? », "" si absente).
+fn cible_query(cible: Text) -> Text {
+    let q = unwrap_or(find(cible, "?"), -1)
+    if q < 0 {
+        return ""
+    }
+    return sub(cible, q + 1, len(cible) - q - 1)
+}
+
+// Valeur d'un paramètre de requête : cible « /x?a=1&b=2 », clé « b » -> « 2 ».
+fn query_param(cible: Text, cle: Text) -> Option<Text> {
+    let qs = cible_query(cible)
+    if len(qs) == 0 {
+        return none
+    }
+    for paire in split(qs, "&") {
+        let eq = unwrap_or(find(paire, "="), -1)
+        if eq > 0 {
+            let k = sub(paire, 0, eq)
+            if k == cle {
+                return some(sub(paire, eq + 1, len(paire) - eq - 1))
+            }
+        }
+    }
+    return none
+}
+
+// Valeur d'un en-tête « Clé: Valeur » si la clé correspond (insensible aux
+// espaces autour de la valeur), sinon `none`.
+fn entete_valeur(ligne: Text, cle: Text) -> Option<Text> {
+    let sep = unwrap_or(find(ligne, ":"), -1)
+    if sep <= 0 {
+        return none
+    }
+    let k = sub(ligne, 0, sep)
+    if lower(k) != lower(cle) {
+        return none
+    }
+    return some(trim(sub(ligne, sep + 1, len(ligne) - sep - 1)))
+}
+
 // ============================ TESTS ============================
 
 fn test_methode() {
@@ -63,4 +142,31 @@ fn test_correspond() {
 fn test_statut() {
     assert(statut_texte(200) == "OK", "200")
     assert(statut_texte(404) == "Not Found", "404")
+}
+
+fn test_ligne_requete() {
+    let l = "GET /users?tri=nom HTTP/1.1"
+    assert(requete_methode(l) == "GET", "methode")
+    assert(requete_cible(l) == "/users?tri=nom", "cible")
+    assert(requete_version(l) == "HTTP/1.1", "version")
+    assert(requete_methode("") == "", "vide")
+}
+
+fn test_cible() {
+    assert(cible_chemin("/a/b?x=1") == "/a/b", "chemin")
+    assert(cible_query("/a/b?x=1") == "x=1", "query")
+    assert(cible_chemin("/a/b") == "/a/b", "sans query")
+    assert(cible_query("/a/b") == "", "query vide")
+}
+
+fn test_query_param() {
+    let c = "/x?a=1&b=deux&c=3"
+    assert(unwrap_or(query_param(c, "b"), "NON") == "deux", "param b")
+    assert(unwrap_or(query_param(c, "a"), "NON") == "1", "param a")
+    assert(unwrap_or(query_param(c, "z"), "NON") == "NON", "param absent")
+}
+
+fn test_entete() {
+    assert(unwrap_or(entete_valeur("Content-Type: text/html", "content-type"), "NON") == "text/html", "entete insensible casse")
+    assert(unwrap_or(entete_valeur("Host: example.com", "Accept"), "NON") == "NON", "mauvaise cle")
 }
