@@ -1,0 +1,66 @@
+// nol.http — briques serveur HTTP en pur Nolc.
+//
+// Fondation du module : validation de méthode et correspondance de chemin de
+// routage. Le serveur complet (parseur HTTP/1.1 + HTTP/2, routeur typé,
+// middlewares pré/post, streaming/SSE, fichiers statiques, limites de requêtes,
+// arrêt gracieux) s'appuiera sur les primitives réseau de la stdlib Nolc et
+// arrive lot par lot — voir README.
+
+// Méthode HTTP reconnue ?
+fn methode_valide(m: Text) -> Bool {
+    return m == "GET" or m == "POST" or m == "PUT" or m == "DELETE"
+        or m == "PATCH" or m == "HEAD" or m == "OPTIONS"
+}
+
+// Normalise un chemin : retire une éventuelle barre oblique finale (sauf « / »).
+fn chemin_normalise(chemin: Text) -> Text {
+    let n = len(chemin)
+    if n > 1 and sub(chemin, n - 1, 1) == "/" {
+        return sub(chemin, 0, n - 1)
+    }
+    return chemin
+}
+
+// Correspondance exacte de chemin (aux barres finales près). Le routage à
+// motifs (« /u/:id ») viendra avec le routeur typé.
+fn chemin_correspond(motif: Text, chemin: Text) -> Bool {
+    return chemin_normalise(motif) == chemin_normalise(chemin)
+}
+
+// Message de statut HTTP pour les codes courants.
+fn statut_texte(code: Int) -> Text {
+    if code == 200 {
+        return "OK"
+    }
+    if code == 404 {
+        return "Not Found"
+    }
+    if code == 500 {
+        return "Internal Server Error"
+    }
+    return "Status"
+}
+
+// ============================ TESTS ============================
+
+fn test_methode() {
+    assert(methode_valide("GET"), "GET valide")
+    assert(methode_valide("DELETE"), "DELETE valide")
+    assert(not methode_valide("BREW"), "BREW invalide")
+}
+
+fn test_normalise() {
+    assert(chemin_normalise("/a/b/") == "/a/b", "retire barre finale")
+    assert(chemin_normalise("/") == "/", "racine conservee")
+    assert(chemin_normalise("/a") == "/a", "sans barre inchange")
+}
+
+fn test_correspond() {
+    assert(chemin_correspond("/users", "/users/"), "egaux aux barres pres")
+    assert(not chemin_correspond("/users", "/posts"), "differents")
+}
+
+fn test_statut() {
+    assert(statut_texte(200) == "OK", "200")
+    assert(statut_texte(404) == "Not Found", "404")
+}

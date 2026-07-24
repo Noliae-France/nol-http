@@ -1,0 +1,9 @@
+[projet]
+nom = "nol-http"
+version = "0.1.0"
+entree = "src/lib.nol"
+auteur = "Bastien LANGUEDOC"
+licence = "MIT"
+description = "Serveur HTTP en pur Nolc : routeur type, middlewares, streaming, fichiers statiques, arret gracieux."
+
+[dependances]
