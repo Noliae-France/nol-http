@@ -23,8 +23,6 @@ jobs:
           "$NOLC" build examples/serveur.nol -o /tmp/srv
           NOL_HTTP_PORT=18080 NOL_HTTP_MAX=1000 /tmp/srv > /tmp/srv.log 2>&1 &
           SRV=$!
-          # garde-fou : ne jamais bloquer le CI
-          ( sleep 40; kill -9 $SRV 2>/dev/null ) &
           sleep 1
           echo "-- routage --"
           test "$(curl -s --max-time 5 http://127.0.0.1:18080/echo/ok)" = "ok"
@@ -33,12 +31,17 @@ jobs:
           echo "-- limite (413) --"
           BIG=$(head -c 2000 </dev/zero | tr '\0' a)
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --data "$BIG" http://127.0.0.1:18080/)" = "413"
-          echo "-- concurrence --"
-          for i in 1 2 3 4 5 6 7 8; do curl -s --max-time 8 "http://127.0.0.1:18080/echo/c$i" -o "/tmp/c$i" & done
-          wait
+          echo "-- concurrence (8 connexions simultanées) --"
+          PIDS=""
+          for i in 1 2 3 4 5 6 7 8; do
+            curl -s --max-time 8 "http://127.0.0.1:18080/echo/c$i" -o "/tmp/c$i" &
+            PIDS="$PIDS $!"
+          done
+          wait $PIDS
           for i in 1 2 3 4 5 6 7 8; do test "$(cat /tmp/c$i)" = "c$i"; done
           echo "-- arret gracieux --"
           curl -s --max-time 5 http://127.0.0.1:18080/stop >/dev/null
-          for t in 1 2 3 4 5; do sleep 1; kill -0 $SRV 2>/dev/null || break; done
-          if kill -0 $SRV 2>/dev/null; then echo "ECHEC: pas d'arret gracieux"; cat /tmp/srv.log; kill -9 $SRV; exit 1; fi
+          ARRET=0
+          for t in 1 2 3 4 5 6; do sleep 1; if ! kill -0 $SRV 2>/dev/null; then ARRET=1; break; fi; done
+          if [ "$ARRET" != "1" ]; then echo "ECHEC: pas d'arret gracieux"; cat /tmp/srv.log; kill -9 $SRV; exit 1; fi
           echo "serveur : integration OK (routage, 413, concurrence, arret gracieux)"
