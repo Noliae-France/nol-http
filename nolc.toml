@@ -4,6 +4,6 @@ version = "0.1.0"
 entree = "src/lib.nol"
 auteur = "daliranas <bastien@languedoc.ovh>"
 licence = "MIT"
-description = "Serveur HTTP en pur Nolc : routeur type, middlewares, streaming, fichiers statiques, arret gracieux."
+description = "Serveur HTTP en pur Nolc : routeur typé, middlewares, streaming, fichiers statiques, arrêt gracieux."
 
 [dependances]
