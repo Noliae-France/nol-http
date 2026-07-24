@@ -1,0 +1,79 @@
+// Serveur HTTP/1.1 concurrent, complet, bâti sur la bibliothèque nol-http.
+//
+// - concurrence réelle : un thread (spawn) par connexion ;
+// - timeouts : lecture bornée par connexion ;
+// - limites : taille de requête plafonnée (413 sinon) ;
+// - arrêt gracieux : « GET /stop » signale l'arrêt via un canal ; la boucle
+//   d'acceptation cesse et draine les connexions en vol (groupe_attend).
+import "../src/lib.nol"
+
+fn traiter(client: Int, control: Chan<Int>, max_octets: Int) {
+    tcp_set_timeout(client, 5000)
+    let brut = unwrap_or(tcp_read(client), "")
+    // Limite anti-abus : refuser d'après le Content-Length annoncé (avant de
+    // lire le corps) OU d'après la taille déjà reçue.
+    let cl = unwrap_or(parse_int(unwrap_or(entete_de(brut, "content-length"), "0")), 0)
+    if cl > max_octets or depasse_taille(brut, max_octets) {
+        let _e = tcp_write(client, reponse_texte(413, "requete trop grande"))
+        tcp_close(client)
+        return
+    }
+    let r = parse_requete(brut)
+    var rep = ""
+    if r.chemin == "/stop" {
+        let _s = chan_envoie(control, 1)
+        rep = reponse_texte(200, "arret")
+    } else if r.chemin == "/" {
+        rep = reponse_html(200, "<h1>nol-http</h1><p>methode=" + r.methode + "</p>")
+    } else if starts_with(r.chemin, "/echo/") {
+        rep = reponse_texte(200, sub(r.chemin, 6, len(r.chemin) - 6))
+    } else if r.chemin == "/json" {
+        rep = reponse_json(200, "{\"ok\":true,\"methode\":\"" + r.methode + "\"}")
+    } else {
+        rep = reponse_texte(404, "introuvable")
+    }
+    let _w = tcp_write(client, rep)
+    tcp_close(client)
+}
+
+fn main() {
+    var port = 18080
+    let voulu = env("NOL_HTTP_PORT")
+    if has(voulu) {
+        port = unwrap_or(parse_int(unwrap_or(voulu, "")), 18080)
+    }
+    var max_octets = 1048576
+    let vmax = env("NOL_HTTP_MAX")
+    if has(vmax) {
+        max_octets = unwrap_or(parse_int(unwrap_or(vmax, "")), 1048576)
+    }
+    let ecoute = tcp_listen(port)
+    if not has(ecoute) {
+        print("echec listen")
+        return
+    }
+    let listener = unwrap_or(ecoute, -1)
+    tcp_set_nonblocking(listener)
+    let control: Chan<Int> = chan_neuf(16)
+    let g = groupe()
+    print("nol-http ecoute sur " + text(port))
+    var arret = false
+    while not arret {
+        let venu = tcp_accept(listener)
+        if has(venu) {
+            spawn traiter(unwrap_or(venu, -1), control, max_octets) in g
+        } else {
+            sleep_ms(10)
+        }
+        select {
+            s in control {
+                arret = s > 0
+            }
+            after 0 {
+            }
+        }
+    }
+    tcp_close(listener)
+    groupe_attend(g)
+    print("arret gracieux")
+}

@@ -1,9 +1,9 @@
 [projet]
 nom = "nol-http"
-version = "0.1.0"
+version = "0.2.0"
 entree = "src/lib.nol"
 auteur = "daliranas <bastien@languedoc.ovh>"
 licence = "MIT"
-description = "Serveur HTTP en pur Nolc : routeur typé, middlewares, streaming, fichiers statiques, arrêt gracieux."
+description = "Serveur HTTP/1.1 concurrent (streaming, timeouts, limites, arrêt gracieux) + briques HTTP, en pur Nolc."
 
 [dependances]

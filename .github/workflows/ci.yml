@@ -14,6 +14,31 @@ jobs:
           curl -fsSL https://noliae-nolc.s3.gra.io.cloud.ovh.net/nolc-latest-linux-x86_64.tar.gz -o /tmp/nolc.tgz
           tar xzf /tmp/nolc.tgz -C /tmp
           echo "NOLC=$(find /tmp -name nolc -type f -perm -u+x | head -1)" >> "$GITHUB_ENV"
-      - name: Tests
+      - name: Tests unitaires
         run: |
           "$NOLC" test src/lib.nol
+      - name: Test d'intégration (serveur réel)
+        run: |
+          set -e
+          "$NOLC" build examples/serveur.nol -o /tmp/srv
+          NOL_HTTP_PORT=18080 NOL_HTTP_MAX=1000 /tmp/srv > /tmp/srv.log 2>&1 &
+          SRV=$!
+          # garde-fou : ne jamais bloquer le CI
+          ( sleep 40; kill -9 $SRV 2>/dev/null ) &
+          sleep 1
+          echo "-- routage --"
+          test "$(curl -s --max-time 5 http://127.0.0.1:18080/echo/ok)" = "ok"
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:18080/)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:18080/inconnu)" = "404"
+          echo "-- limite (413) --"
+          BIG=$(head -c 2000 </dev/zero | tr '\0' a)
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --data "$BIG" http://127.0.0.1:18080/)" = "413"
+          echo "-- concurrence --"
+          for i in 1 2 3 4 5 6 7 8; do curl -s --max-time 8 "http://127.0.0.1:18080/echo/c$i" -o "/tmp/c$i" & done
+          wait
+          for i in 1 2 3 4 5 6 7 8; do test "$(cat /tmp/c$i)" = "c$i"; done
+          echo "-- arret gracieux --"
+          curl -s --max-time 5 http://127.0.0.1:18080/stop >/dev/null
+          for t in 1 2 3 4 5; do sleep 1; kill -0 $SRV 2>/dev/null || break; done
+          if kill -0 $SRV 2>/dev/null; then echo "ECHEC: pas d'arret gracieux"; cat /tmp/srv.log; kill -9 $SRV; exit 1; fi
+          echo "serveur : integration OK (routage, 413, concurrence, arret gracieux)"

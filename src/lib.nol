@@ -32,11 +32,47 @@ fn statut_texte(code: Int) -> Text {
     if code == 200 {
         return "OK"
     }
+    if code == 201 {
+        return "Created"
+    }
+    if code == 204 {
+        return "No Content"
+    }
+    if code == 301 {
+        return "Moved Permanently"
+    }
+    if code == 302 {
+        return "Found"
+    }
+    if code == 304 {
+        return "Not Modified"
+    }
+    if code == 400 {
+        return "Bad Request"
+    }
+    if code == 401 {
+        return "Unauthorized"
+    }
+    if code == 403 {
+        return "Forbidden"
+    }
     if code == 404 {
         return "Not Found"
     }
+    if code == 405 {
+        return "Method Not Allowed"
+    }
+    if code == 413 {
+        return "Payload Too Large"
+    }
+    if code == 429 {
+        return "Too Many Requests"
+    }
     if code == 500 {
         return "Internal Server Error"
+    }
+    if code == 503 {
+        return "Service Unavailable"
     }
     return "Status"
 }
@@ -120,6 +156,123 @@ fn entete_valeur(ligne: Text, cle: Text) -> Option<Text> {
     return some(trim(sub(ligne, sep + 1, len(ligne) - sep - 1)))
 }
 
+// ---- Requête complète (ligne + en-têtes + corps) ----
+
+record RequeteHttp {
+    methode: Text,
+    cible: Text,
+    chemin: Text,
+    query: Text,
+    version: Text,
+    corps: Text
+}
+
+// Corps de la requête : ce qui suit la première ligne vide « \r\n\r\n ».
+fn corps_requete(brut: Text) -> Text {
+    let sep = unwrap_or(find(brut, "\r\n\r\n"), -1)
+    if sep < 0 {
+        return ""
+    }
+    return sub(brut, sep + 4, len(brut) - sep - 4)
+}
+
+// Première ligne (ligne de requête) d'une requête brute.
+fn ligne_requete(brut: Text) -> Text {
+    let i = unwrap_or(find(brut, "\r\n"), -1)
+    if i < 0 {
+        return brut
+    }
+    return sub(brut, 0, i)
+}
+
+// Analyse une requête HTTP brute complète.
+fn parse_requete(brut: Text) -> RequeteHttp {
+    let ligne = ligne_requete(brut)
+    let cible = requete_cible(ligne)
+    return RequeteHttp {
+        methode: requete_methode(ligne),
+        cible: cible,
+        chemin: cible_chemin(cible),
+        query: cible_query(cible),
+        version: requete_version(ligne),
+        corps: corps_requete(brut)
+    }
+}
+
+// Valeur d'un en-tête parmi TOUTES les lignes d'en-tête (insensible à la casse).
+fn entete_de(brut: Text, cle: Text) -> Option<Text> {
+    for ligne in split(brut, "\r\n") {
+        if len(ligne) == 0 {
+            return none
+        }
+        let v = entete_valeur(ligne, cle)
+        if has(v) {
+            return v
+        }
+    }
+    return none
+}
+
+// La requête dépasse-t-elle la taille maximale autorisée (limite anti-abus) ?
+fn depasse_taille(brut: Text, max_octets: Int) -> Bool {
+    return len(brut) > max_octets
+}
+
+// ---- Construction de réponses ----
+
+// Réponse HTTP complète : ligne de statut + en-têtes usuels + corps.
+fn reponse(code: Int, content_type: Text, corps: Text) -> Text {
+    return "HTTP/1.1 " + text(code) + " " + statut_texte(code)
+        + "\r\nServer: nol-http"
+        + "\r\nContent-Type: " + content_type
+        + "\r\nContent-Length: " + text(len(corps))
+        + "\r\nConnection: close\r\n\r\n" + corps
+}
+
+fn reponse_texte(code: Int, corps: Text) -> Text {
+    return reponse(code, "text/plain; charset=utf-8", corps)
+}
+fn reponse_html(code: Int, corps: Text) -> Text {
+    return reponse(code, "text/html; charset=utf-8", corps)
+}
+fn reponse_json(code: Int, corps: Text) -> Text {
+    return reponse(code, "application/json", corps)
+}
+
+// ---- Streaming (Transfer-Encoding: chunked) ----
+
+fn hex(n: Int) -> Text {
+    if n == 0 {
+        return "0"
+    }
+    let chiffres = "0123456789abcdef"
+    var v = n
+    var out = ""
+    while v > 0 {
+        out = char_at(chiffres, v % 16) + out
+        v = v / 16
+    }
+    return out
+}
+
+// En-têtes d'une réponse en flux (chunked). Le corps suit, morceau par morceau.
+fn entetes_flux(code: Int, content_type: Text) -> Text {
+    return "HTTP/1.1 " + text(code) + " " + statut_texte(code)
+        + "\r\nServer: nol-http"
+        + "\r\nContent-Type: " + content_type
+        + "\r\nTransfer-Encoding: chunked\r\n\r\n"
+}
+
+// Un morceau chunké : taille en hexa, CRLF, données, CRLF.
+fn chunk(donnees: Text) -> Text {
+    return hex(len(donnees)) + "\r\n" + donnees + "\r\n"
+}
+
+// Marqueur de fin de flux chunké.
+fn chunk_fin() -> Text {
+    return "0\r\n\r\n"
+}
+
 // ============================ TESTS ============================
 
 fn test_methode() {
@@ -169,4 +322,53 @@ fn test_query_param() {
 fn test_entete() {
     assert(unwrap_or(entete_valeur("Content-Type: text/html", "content-type"), "NON") == "text/html", "entete insensible casse")
     assert(unwrap_or(entete_valeur("Host: example.com", "Accept"), "NON") == "NON", "mauvaise cle")
+}
+
+fn requete_brute() -> Text {
+    return "POST /api/users?tri=nom HTTP/1.1\r\nHost: exemple.com\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"nom\":\"Bo\"}"
+}
+
+fn test_parse_requete() {
+    let r = parse_requete(requete_brute())
+    assert(r.methode == "POST", "methode")
+    assert(r.chemin == "/api/users", "chemin")
+    assert(r.query == "tri=nom", "query")
+    assert(r.version == "HTTP/1.1", "version")
+    assert(r.corps == "{\"nom\":\"Bo\"}", "corps")
+}
+
+fn test_entete_de() {
+    assert(unwrap_or(entete_de(requete_brute(), "content-type"), "") == "application/json", "content-type")
+    assert(unwrap_or(entete_de(requete_brute(), "Host"), "") == "exemple.com", "host")
+    assert(not has(entete_de(requete_brute(), "Authorization")), "absent")
+}
+
+fn test_reponse() {
+    let rep = reponse(404, "text/plain; charset=utf-8", "nope")
+    assert(starts_with(rep, "HTTP/1.1 404 Not Found\r\n"), "ligne de statut")
+    assert(contains(rep, "Content-Length: 4"), "content-length")
+    assert(contains(rep, "\r\n\r\nnope"), "corps apres entetes")
+    assert(contains(reponse_json(200, "{}"), "Content-Type: application/json"), "json")
+    assert(contains(reponse_texte(200, "x"), "text/plain"), "texte")
+    assert(contains(reponse_html(200, "<b/>"), "text/html"), "html")
+}
+
+fn test_limite() {
+    assert(depasse_taille("aaaaa", 3), "depassement detecte")
+    assert(not depasse_taille("ab", 10), "sous la limite")
+}
+
+fn test_chunked() {
+    assert(hex(255) == "ff", "hex")
+    assert(hex(0) == "0", "hex zero")
+    assert(chunk("Wiki") == "4\r\nWiki\r\n", "chunk")
+    assert(chunk_fin() == "0\r\n\r\n", "fin de flux")
+    assert(contains(entetes_flux(200, "text/plain"), "Transfer-Encoding: chunked"), "entete chunked")
+}
+
+fn test_statuts_etendus() {
+    assert(statut_texte(201) == "Created", "201")
+    assert(statut_texte(400) == "Bad Request", "400")
+    assert(statut_texte(429) == "Too Many Requests", "429")
+    assert(statut_texte(503) == "Service Unavailable", "503")
 }
